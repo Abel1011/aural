@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ArrowLeft, Loader2, FileText, Clock, X, Mic, Play, Pause, AudioLines, Sparkles, Printer } from "lucide-react";
+import { ArrowLeft, Loader2, FileText, Clock, X, Mic, Play, Pause, AudioLines, Sparkles, Printer, Trash2, AlertTriangle } from "lucide-react";
 import {
   conditionColors,
   conditionLabels,
   hasToothFinding,
-  labelConditions,
   surfaceConditions,
   type ToothState,
   type Condition,
@@ -321,6 +320,9 @@ export default function SessionViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTooth, setSelectedTooth] = useState<number | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingSession, setDeletingSession] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Report state
   const [report, setReport] = useState<string | null>(null);
@@ -372,6 +374,26 @@ export default function SessionViewer({
       setReportLoading(false);
     }
   }, [sessionId]);
+
+  const deleteSessionHandler = useCallback(async () => {
+    setDeletingSession(true);
+    setDeleteError(null);
+
+    try {
+      const resp = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+      if (!resp.ok) {
+        const data = (await resp.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? `HTTP ${resp.status}`);
+      }
+
+      setShowDeleteConfirm(false);
+      onBack();
+    } catch (err) {
+      setDeleteError((err as Error).message);
+    } finally {
+      setDeletingSession(false);
+    }
+  }, [onBack, sessionId]);
 
   const printReport = useCallback(() => {
     if (!report || !session) return;
@@ -509,6 +531,18 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
             <div className="flex-1 min-w-2" />
 
             <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+              {session.status === "completed" && (
+                <button
+                  onClick={() => {
+                    setDeleteError(null);
+                    setShowDeleteConfirm(true);
+                  }}
+                  className="flex items-center gap-1 sm:gap-1.5 rounded-lg border border-clay-200/70 bg-white px-2 sm:px-2.5 py-1.5 text-[11px] sm:text-[12px] font-medium text-clay-600 hover:bg-clay-50 hover:border-clay-300 transition-colors"
+                >
+                  <Trash2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span className="hidden sm:inline">Delete</span>
+                </button>
+              )}
               <div className="flex items-center gap-1 sm:gap-1.5 rounded-lg bg-sand-50 px-2 sm:px-2.5 py-1.5 text-[11px] sm:text-[12px] text-sand-500 border border-sand-100">
                 <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="hidden sm:inline">{dateStr}</span>
@@ -771,6 +805,69 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
           </div>
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close delete confirmation"
+            onClick={() => {
+              if (!deletingSession) {
+                setShowDeleteConfirm(false);
+                setDeleteError(null);
+              }
+            }}
+            className="absolute inset-0 bg-sand-950/35 backdrop-blur-[2px]"
+          />
+
+          <div className="relative w-full max-w-md rounded-[24px] glass-card-solid border border-white/70 p-5 sm:p-6 shadow-[0_32px_80px_-28px_rgba(18,22,30,0.35)]">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-clay-50 border border-clay-200/70 text-clay-600">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-[17px] font-bold font-display text-sand-900">Delete session?</h2>
+                <p className="mt-1 text-[13px] leading-relaxed text-sand-500">
+                  This will permanently remove the completed session, its voice recordings, and the cached clinical report.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-sand-200/70 bg-white/70 px-4 py-3">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-sand-400">Session</p>
+              <p className="mt-1 text-[14px] font-semibold text-sand-800">{patientName}</p>
+              <p className="text-[12px] text-sand-500">{dateStr}</p>
+            </div>
+
+            {deleteError && (
+              <div className="mt-4 rounded-xl border border-clay-200 bg-clay-50 px-3 py-2 text-[12px] text-clay-700">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteError(null);
+                }}
+                disabled={deletingSession}
+                className="rounded-xl border border-sand-200 bg-white px-4 py-2 text-[13px] font-medium text-sand-600 hover:bg-sand-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteSessionHandler}
+                disabled={deletingSession}
+                className="flex items-center gap-2 rounded-xl bg-clay-500 px-4 py-2 text-[13px] font-semibold text-white hover:bg-clay-600 transition-colors disabled:opacity-50"
+              >
+                {deletingSession ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

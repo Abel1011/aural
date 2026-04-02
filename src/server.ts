@@ -1,7 +1,11 @@
 import { routeAgentRequest } from "agents";
 import { generateReport } from "./lib/report-ai";
 import { askAboutPatient, type SessionRecord } from "./lib/patient-rag";
-import { seedDemoData } from "./lib/demo-seed";
+import {
+  isDemoSessionId,
+  markDemoSessionDeleted,
+  seedDemoData,
+} from "./lib/demo-seed";
 import { createClient, streamToDataUri } from "./lib/elevenlabs";
 import type { ToothState, VoiceLogEntry } from "./data/dental";
 
@@ -97,6 +101,20 @@ async function ensureSessionNotesColumn(env: Env): Promise<void> {
     await sessionNotesSchemaPromise;
   } catch {
     // D1 may not be available in local dev; queries below will continue best-effort.
+  }
+}
+
+async function deleteR2Prefix(bucket: R2Bucket, prefix: string): Promise<void> {
+  let cursor: string | undefined;
+
+  while (true) {
+    const list = await bucket.list({ prefix, cursor });
+    if (list.objects.length > 0) {
+      await bucket.delete(list.objects.map((object) => object.key));
+    }
+
+    if (!list.truncated) break;
+    cursor = list.cursor;
   }
 }
 
@@ -286,6 +304,39 @@ async function handleApiRequest(
         teeth_data: session.teeth_data ? JSON.parse(session.teeth_data) : null,
         voice_log: session.voice_log ? JSON.parse(session.voice_log) : null,
       }, { headers: cors });
+    }
+
+    // DELETE /api/sessions/:id — delete a completed session and its generated assets
+    if (sessionDetailMatch && request.method === "DELETE") {
+      const sessionId = sessionDetailMatch[1];
+      const session = await env.DB.prepare(
+        "SELECT id, status FROM sessions WHERE id = ?",
+      )
+        .bind(sessionId)
+        .first<{ id: string; status: string }>();
+
+      if (!session) {
+        return Response.json({ error: "Session not found" }, { status: 404, headers: cors });
+      }
+
+      if (session.status !== "completed") {
+        return Response.json(
+          { error: "Only completed sessions can be deleted" },
+          { status: 409, headers: cors },
+        );
+      }
+
+      if (isDemoSessionId(sessionId)) {
+        await markDemoSessionDeleted(env, sessionId);
+      }
+
+      await Promise.all([
+        env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run(),
+        env.REPORTS.delete(`reports/${sessionId}.md`),
+        deleteR2Prefix(env.REPORTS, `audio/${sessionId}/`),
+      ]);
+
+      return Response.json({ id: sessionId, deleted: true }, { headers: cors });
     }
 
     // PUT /api/sessions/:id/complete — mark session complete

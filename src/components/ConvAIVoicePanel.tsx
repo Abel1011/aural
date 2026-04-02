@@ -96,6 +96,7 @@ function ConvAIInner({
   voiceLog,
   sessionId,
   patientId,
+  currentTeeth,
   currentSessionNotes,
   onAgentActiveChange,
 }: {
@@ -106,12 +107,12 @@ function ConvAIInner({
   voiceLog: VoiceLogEntry[];
   sessionId: string;
   patientId: string;
+  currentTeeth: ToothState[];
   currentSessionNotes: string;
   onAgentActiveChange?: (active: boolean) => void;
 }) {
   // Accumulated transcript messages (persists after disconnect)
   const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "agent"; text: string }>>([]);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   // Audio capture: record full conversation via mic (with echo cancellation off to capture agent audio too)
   const micRecorderRef = useRef<MediaRecorder | null>(null);
@@ -176,7 +177,6 @@ function ConvAIInner({
   const [startTime] = useState(() => Date.now());
   const [starting, setStarting] = useState(false);
   const [lastAction, setLastAction] = useState("");
-  const logEndRef = useRef<HTMLDivElement>(null);
 
   // Load any previously saved recordings for this session
   useEffect(() => {
@@ -244,15 +244,6 @@ function ConvAIInner({
     },
     [getElapsed, appendVoiceLogOnDO],
   );
-
-  // Auto-scroll transcript and log when new entries arrive
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
-
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [voiceLog.length]);
 
   // Register client tool: update_odontogram
   useConversationClientTool("update_odontogram", async (params: Record<string, unknown>) => {
@@ -332,7 +323,7 @@ function ConvAIInner({
       const resp = await fetch(`/api/patients/${patientId}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, currentSessionNotes }),
+        body: JSON.stringify({ question, currentTeeth, currentSessionNotes }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = (await resp.json()) as { answer: string };
@@ -507,7 +498,6 @@ function ConvAIInner({
               </p>
             </div>
           )}
-          <div ref={transcriptEndRef} />
         </div>
       </div>
 
@@ -547,7 +537,6 @@ function ConvAIInner({
               <LogEntry key={entry.id} entry={entry} />
             ))
           )}
-          <div ref={logEndRef} />
         </div>
       </div>
 
@@ -585,6 +574,7 @@ export default function ConvAIVoicePanel({
   voiceLog,
   sessionId,
   patientId,
+  currentTeeth,
   currentSessionNotes,
   onAgentActiveChange,
 }: {
@@ -595,12 +585,13 @@ export default function ConvAIVoicePanel({
   voiceLog: VoiceLogEntry[];
   sessionId: string;
   patientId: string;
+  currentTeeth: ToothState[];
   currentSessionNotes: string;
   onAgentActiveChange?: (active: boolean) => void;
 }) {
   return (
     <ConversationProvider>
-      <ConvAIInner updateTooth={updateTooth} updateSessionNotesOnDO={updateSessionNotes} undoOnDO={undo} appendVoiceLogOnDO={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patientId} currentSessionNotes={currentSessionNotes} onAgentActiveChange={onAgentActiveChange} />
+      <ConvAIInner updateTooth={updateTooth} updateSessionNotesOnDO={updateSessionNotes} undoOnDO={undo} appendVoiceLogOnDO={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patientId} currentTeeth={currentTeeth} currentSessionNotes={currentSessionNotes} onAgentActiveChange={onAgentActiveChange} />
     </ConversationProvider>
   );
 }

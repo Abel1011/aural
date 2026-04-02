@@ -902,11 +902,10 @@ function VoiceSessionInner({
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
+  const odontogramRef = useRef<HTMLDivElement>(null);
 
   const anyMicActive = voiceActive || agentActive;
   const [elapsed, setElapsed] = useState("00:00");
-
-  const logEndRef = useRef<HTMLDivElement>(null);
   // Track last processed committed transcript to avoid re-processing
   const lastProcessedRef = useRef("");
   // Ref to track processing state for modal close logic
@@ -938,6 +937,45 @@ function VoiceSessionInner({
 
   const printReport = useCallback(() => {
     if (!report) return;
+
+    let odontogramHtml = "";
+    const svgEl = odontogramRef.current?.querySelector("svg");
+    if (svgEl) {
+      const clone = svgEl.cloneNode(true) as SVGElement;
+      clone.querySelectorAll("[style*=cursor]").forEach((el) => {
+        (el as HTMLElement).style.cursor = "default";
+      });
+      clone.setAttribute("width", "100%");
+      clone.setAttribute("height", "auto");
+      const svgStr = new XMLSerializer().serializeToString(clone);
+      const legendItems = [
+        { color: "#D4503A", label: "Caries / RCT" },
+        { color: "#5A96C8", label: "Composite" },
+        { color: "#7A7A7A", label: "Amalgam" },
+        { color: "#88B4D0", label: "Inlay" },
+        { color: "#6694B8", label: "Onlay" },
+        { color: "#E49545", label: "Crown" },
+        { color: "#C77B30", label: "Bridge" },
+        { color: "#B37886", label: "Prosthesis" },
+        { color: "#4A86C2", label: "Implant" },
+        { color: "#D8DDE5", label: "Missing" },
+      ];
+      const legendHtml = legendItems
+        .map((item) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${item.color};"></span><span>${item.label}</span></span>`)
+        .join("");
+
+      odontogramHtml = `
+        <div style="margin-bottom:28px;">
+          <h2 style="font-size:16px;color:#2a303a;margin-bottom:8px;">Odontogram</h2>
+          <div style="border:1px solid #e0e0e0;border-radius:8px;padding:12px 8px;background:#fafafa;">
+            ${svgStr}
+          </div>
+          <div style="margin-top:8px;font-size:11px;color:#6b7588;line-height:2;">${legendHtml}</div>
+        </div>
+        <hr style="border:none;border-top:1px solid #e0e0e0;margin:24px 0;">
+      `;
+    }
+
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     printWindow.document.write(`<!DOCTYPE html>
@@ -952,10 +990,12 @@ function VoiceSessionInner({
   li { margin: 4px 0; }
   strong { color: #2a303a; }
   .meta { font-size: 12px; color: #6b7588; margin-bottom: 24px; }
+  svg { max-width: 100%; height: auto; }
   @media print { body { margin: 20px; } }
 </style></head><body>
 <h1>Clinical Dental Report</h1>
 <div class="meta">Patient: ${patient.name} | Date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
+${odontogramHtml}
 ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/^- (.*)/gm, "<li>$1</li>").replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>").replace(/\n\n/g, "</p><p>").replace(/^(?!<[hul])/gm, "<p>").replace(/<p><\/p>/g, "")}
 </body></html>`);
     printWindow.document.close();
@@ -1063,11 +1103,6 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
     }, 1000);
     return () => clearInterval(interval);
   }, [startTime]);
-
-  // Auto-scroll voice log when new entries arrive
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [voiceLog.length, processing]);
 
   // Start/stop microphone capture via useScribe
   const toggleVoice = useCallback(async () => {
@@ -1248,7 +1283,7 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
                 </div>
                 <Legend />
               </div>
-              <div className="px-2 sm:px-4 pb-4 sm:pb-5 overflow-x-auto">
+              <div ref={odontogramRef} className="px-2 sm:px-4 pb-4 sm:pb-5 overflow-x-auto">
                 <div className="min-w-[700px]">
                   <Odontogram
                     teeth={teeth}
@@ -1378,7 +1413,7 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
           <div className="w-full lg:w-[380px] lg:shrink-0 space-y-4 lg:space-y-0">
             {/* Agent panel — always mounted, hidden when not active */}
             <div className={voiceMode === "agent" ? "" : "hidden"}>
-              <ConvAIVoicePanel updateTooth={updateTooth} updateSessionNotes={updateSessionNotes} undo={undo} appendVoiceLog={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patient.id} currentSessionNotes={sessionNotes} onAgentActiveChange={setAgentActive} />
+              <ConvAIVoicePanel updateTooth={updateTooth} updateSessionNotes={updateSessionNotes} undo={undo} appendVoiceLog={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patient.id} currentTeeth={teeth} currentSessionNotes={sessionNotes} onAgentActiveChange={setAgentActive} />
             </div>
             {/* Scribe panel */}
             <div className={voiceMode === "scribe" ? "" : "hidden"}>
@@ -1525,7 +1560,6 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
                     </p>
                   </div>
                 )}
-                <div ref={logEndRef} />
               </div>
             </div>
 

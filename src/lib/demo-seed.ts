@@ -564,11 +564,59 @@ const DEMO_PATIENTS: SeedPatient[] = [
 ];
 
 let demoSeedPromise: Promise<void> | null = null;
+let deletedDemoSessionsSchemaPromise: Promise<void> | null = null;
+
+async function ensureDeletedDemoSessionsTable(env: Env): Promise<void> {
+  if (!deletedDemoSessionsSchemaPromise) {
+    deletedDemoSessionsSchemaPromise = env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS deleted_demo_sessions (id TEXT PRIMARY KEY, deleted_at TEXT DEFAULT (datetime('now')))"
+    )
+      .run()
+      .then(() => undefined)
+      .catch((err) => {
+        deletedDemoSessionsSchemaPromise = null;
+        throw err;
+      });
+  }
+
+  await deletedDemoSessionsSchemaPromise;
+}
+
+export function isDemoSessionId(sessionId: string): boolean {
+  return sessionId.startsWith("demo-session-");
+}
+
+export async function markDemoSessionDeleted(env: Env, sessionId: string): Promise<void> {
+  await ensureDeletedDemoSessionsTable(env);
+  await env.DB.prepare(
+    "INSERT INTO deleted_demo_sessions (id, deleted_at) VALUES (?, datetime('now')) ON CONFLICT(id) DO UPDATE SET deleted_at = datetime('now')",
+  )
+    .bind(sessionId)
+    .run();
+}
 
 export async function seedDemoData(env: Env): Promise<void> {
   if (demoSeedPromise) return demoSeedPromise;
 
   demoSeedPromise = (async () => {
+    await ensureDeletedDemoSessionsTable(env);
+
+    const [patientCount, sessionCount] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) as count FROM patients").first<{ count: number }>(),
+      env.DB.prepare("SELECT COUNT(*) as count FROM sessions").first<{ count: number }>(),
+    ]);
+
+    if ((patientCount?.count ?? 0) === 0 && (sessionCount?.count ?? 0) === 0) {
+      await env.DB.prepare("DELETE FROM deleted_demo_sessions").run();
+    }
+
+    const deletedDemoSessions = await env.DB.prepare(
+      "SELECT id FROM deleted_demo_sessions",
+    ).all<{ id: string }>();
+    const deletedSessionIds = new Set(
+      (deletedDemoSessions.results ?? []).map((row) => row.id),
+    );
+
     for (const patient of DEMO_PATIENTS) {
       await env.DB.prepare(
         "INSERT INTO patients (id, name, date_of_birth, notes, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, date_of_birth = excluded.date_of_birth, notes = excluded.notes, created_at = excluded.created_at",
@@ -583,6 +631,8 @@ export async function seedDemoData(env: Env): Promise<void> {
         .run();
 
       for (const session of patient.sessions) {
+        if (deletedSessionIds.has(session.id)) continue;
+
         await env.DB.prepare(
           "INSERT INTO sessions (id, patient_id, status, summary, session_notes, teeth_data, voice_log, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET patient_id = excluded.patient_id, status = excluded.status, summary = excluded.summary, session_notes = excluded.session_notes, teeth_data = excluded.teeth_data, voice_log = excluded.voice_log, created_at = excluded.created_at, completed_at = excluded.completed_at",
         )
