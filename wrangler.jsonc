@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "aural",
+  "name": "vocalchart",
   "main": "src/server.ts",
   "compatibility_date": "2026-01-28",
   "compatibility_flags": ["nodejs_compat"],
@@ -8,13 +8,13 @@
   // Bindings
   "ai": { "binding": "AI" },
   "d1_databases": [
-    { "binding": "DB", "database_name": "aural-db", "database_id": "09984a5c-f541-4233-8a72-e99ea8f6bbee" }
+    { "binding": "DB", "database_name": "vocalchart-db", "database_id": "09984a5c-f541-4233-8a72-e99ea8f6bbee" }
   ],
   "kv_namespaces": [
     { "binding": "CACHE", "id": "5846a98a3e184dabbef90824ca2afe85" }
   ],
   "r2_buckets": [
-    { "binding": "REPORTS", "bucket_name": "aural-reports" }
+    { "binding": "REPORTS", "bucket_name": "vocalchart-reports" }
   ],
   "secrets": { "required": ["ELEVENLABS_API_KEY", "ELEVENLABS_AGENT_ID", "GOOGLE_AI_API_KEY"] },
 
