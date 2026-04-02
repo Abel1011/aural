@@ -7,9 +7,11 @@ const FALLBACK_TEETH = createInitialTeeth();
 
 interface UseSessionReturn {
   teeth: ToothState[];
+  sessionNotes: string;
   voiceLog: VoiceLogEntry[];
   connected: boolean;
   updateTooth: (tooth: ToothState) => void;
+  updateSessionNotes: (notes: string, mode?: "replace" | "append", trackUndo?: boolean) => Promise<string>;
   processVoice: (transcript: string) => Promise<{ text: string; speak: boolean }>;
   appendVoiceLog: (entries: VoiceLogEntry[]) => void;
   undo: () => Promise<string>;
@@ -60,6 +62,7 @@ export function useSession(
   }, [connected, state?.sessionId, sessionId, patientId, patientName]);
 
   const teeth = state?.teeth?.length ? state.teeth : FALLBACK_TEETH;
+  const sessionNotes = state?.sessionNotes ?? "";
   const voiceLog = state?.voiceLog ?? [];
 
   const call = useCallback(
@@ -73,6 +76,12 @@ export function useSession(
 
   const updateTooth = useCallback(
     (tooth: ToothState) => { call("updateTooth", [tooth.number, tooth]); },
+    [call],
+  );
+
+  const updateSessionNotes = useCallback(
+    (notes: string, mode: "replace" | "append" = "replace", trackUndo = true) =>
+      call<string>("updateSessionNotes", [notes, mode, trackUndo]),
     [call],
   );
 
@@ -102,9 +111,11 @@ export function useSession(
 
   return {
     teeth,
+    sessionNotes,
     voiceLog,
     connected,
     updateTooth,
+    updateSessionNotes,
     processVoice,
     appendVoiceLog,
     undo,

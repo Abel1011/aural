@@ -299,6 +299,7 @@ interface SessionData {
   patient_name: string | null;
   status: string;
   summary: string | null;
+  session_notes: string | null;
   teeth_data: ToothState[] | null;
   voice_log: VoiceLogEntry[] | null;
   created_at: string;
@@ -473,6 +474,7 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
   const voiceLog = session.voice_log ?? [];
   const patientName = session.patient_name ?? "Unknown";
   const findingsCount = teeth.filter(hasToothFinding).length;
+  const hasReportableContent = findingsCount > 0 || Boolean(session.session_notes?.trim());
   const selectedToothData = selectedTooth ? teeth.find((t) => t.number === selectedTooth) ?? null : null;
 
   const dateStr = new Date(session.created_at).toLocaleDateString("en-US", {
@@ -614,14 +616,14 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
                     </div>
                     <button
                       onClick={generateReportHandler}
-                      disabled={findingsCount === 0}
+                      disabled={!hasReportableContent}
                       className="flex items-center gap-2 rounded-xl bg-saffron-400 px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-saffron-500 active:bg-saffron-600 transition-all shadow-md shadow-saffron-400/20 disabled:opacity-50 disabled:cursor-not-allowed mt-1"
                     >
                       <Sparkles className="h-4 w-4" />
                       Generate report
                     </button>
-                    {findingsCount === 0 && (
-                      <p className="text-[11px] text-sand-400 italic">No findings to report</p>
+                    {!hasReportableContent && (
+                      <p className="text-[11px] text-sand-400 italic">No findings or session notes to report</p>
                     )}
                   </div>
                 )}
@@ -657,6 +659,18 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
                 )}
               </div>
             </div>
+
+            {session.session_notes && (
+              <div className="rounded-2xl glass-card-solid glow-card overflow-hidden">
+                <div className="flex items-center gap-2 border-b border-sand-100/50 px-4 sm:px-5 py-3">
+                  <FileText className="h-3.5 w-3.5 text-sand-400" />
+                  <h3 className="text-[13px] font-bold font-display text-sand-700">Session notes</h3>
+                </div>
+                <div className="px-4 sm:px-5 py-4">
+                  <p className="text-[13px] text-sand-700 leading-relaxed whitespace-pre-wrap">{session.session_notes}</p>
+                </div>
+              </div>
+            )}
 
             {/* Findings list */}
             {teeth.length > 0 && (

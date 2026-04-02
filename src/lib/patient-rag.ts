@@ -30,6 +30,7 @@ export interface SessionRecord {
   id: string;
   status: string;
   summary: string | null;
+  session_notes: string | null;
   teeth_data: string | null;
   voice_log: string | null;
   created_at: string;
@@ -41,6 +42,7 @@ function buildPatientContext(
   patientName: string,
   sessions: SessionRecord[],
   currentTeeth?: ToothState[],
+  currentSessionNotes?: string,
 ): string {
   let context = `Patient: ${patientName}\nTotal sessions on record: ${sessions.length}\n\n`;
 
@@ -59,7 +61,13 @@ function buildPatientContext(
         if (t.note) parts.push(`Note: ${t.note}`);
         context += `  ${parts.join(" | ")}\n`;
       }
+      if (currentSessionNotes?.trim()) {
+        context += `General session notes: ${currentSessionNotes.trim()}\n`;
+      }
       context += "\n";
+    } else if (currentSessionNotes?.trim()) {
+      context += "=== CURRENT SESSION (live) ===\n";
+      context += `General session notes: ${currentSessionNotes.trim()}\n\n`;
     }
   }
 
@@ -75,6 +83,10 @@ function buildPatientContext(
 
     if (session.summary) {
       context += `Summary: ${session.summary}\n`;
+    }
+
+    if (session.session_notes) {
+      context += `General session notes: ${session.session_notes}\n`;
     }
 
     if (session.teeth_data) {
@@ -170,9 +182,15 @@ export async function askAboutPatient(
   patientName: string,
   sessions: SessionRecord[],
   currentTeeth?: ToothState[],
+  currentSessionNotes?: string,
   googleAiApiKey?: string,
 ): Promise<string> {
-  const context = buildPatientContext(patientName, sessions, currentTeeth);
+  const context = buildPatientContext(
+    patientName,
+    sessions,
+    currentTeeth,
+    currentSessionNotes,
+  );
 
   const userMessage = `Here is the patient's full dental history:\n\n${context}\n---\nDentist's question: ${question}`;
 

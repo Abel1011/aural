@@ -90,19 +90,23 @@ function AudioRecording({ url, label }: { url: string; label: string }) {
 /* ------------------------------------------------------------------ */
 function ConvAIInner({
   updateTooth,
+  updateSessionNotesOnDO,
   undoOnDO,
   appendVoiceLogOnDO,
   voiceLog,
   sessionId,
   patientId,
+  currentSessionNotes,
   onAgentActiveChange,
 }: {
   updateTooth: (tooth: ToothState) => void;
+  updateSessionNotesOnDO: (notes: string, mode?: "replace" | "append") => Promise<string>;
   undoOnDO: () => Promise<string>;
   appendVoiceLogOnDO: (entries: VoiceLogEntry[]) => void;
   voiceLog: VoiceLogEntry[];
   sessionId: string;
   patientId: string;
+  currentSessionNotes: string;
   onAgentActiveChange?: (active: boolean) => void;
 }) {
   // Accumulated transcript messages (persists after disconnect)
@@ -280,6 +284,10 @@ function ConvAIInner({
       changes.mobility = String(params.mobility) as ToothState["mobility"];
     }
 
+    if (params.note) {
+      changes.note = String(params.note).trim() || undefined;
+    }
+
     updateTooth({ number: toothNumber, ...changes } as ToothState);
 
     const parts = [`Tooth ${toothNumber}`];
@@ -288,10 +296,22 @@ function ConvAIInner({
       parts.push(`${params.surface_condition} on ${String(params.surfaces)}`);
     }
     if (params.mobility && params.mobility !== "none") parts.push(`mobility ${params.mobility}`);
+    if (params.note) parts.push("note added");
     const confirmation = parts.join(", ") + " registered.";
 
     addLogEntry("Voice command", confirmation);
     return confirmation;
+  });
+
+  // Register client tool: update_session_notes
+  useConversationClientTool("update_session_notes", async (params: Record<string, unknown>) => {
+    const note = String(params.note ?? "").trim();
+    const mode = String(params.mode ?? "append") === "replace" ? "replace" : "append";
+    if (!note) return "No session note provided.";
+
+    const msg = await updateSessionNotesOnDO(note, mode);
+    addLogEntry("Voice command", mode === "append" ? `Session note added: ${note}` : msg);
+    return msg;
   });
 
   // Register client tool: undo_last
@@ -312,7 +332,7 @@ function ConvAIInner({
       const resp = await fetch(`/api/patients/${patientId}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, currentSessionNotes }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = (await resp.json()) as { answer: string };
@@ -559,24 +579,28 @@ function ConvAIInner({
 /* ------------------------------------------------------------------ */
 export default function ConvAIVoicePanel({
   updateTooth,
+  updateSessionNotes,
   undo,
   appendVoiceLog,
   voiceLog,
   sessionId,
   patientId,
+  currentSessionNotes,
   onAgentActiveChange,
 }: {
   updateTooth: (tooth: ToothState) => void;
+  updateSessionNotes: (notes: string, mode?: "replace" | "append") => Promise<string>;
   undo: () => Promise<string>;
   appendVoiceLog: (entries: VoiceLogEntry[]) => void;
   voiceLog: VoiceLogEntry[];
   sessionId: string;
   patientId: string;
+  currentSessionNotes: string;
   onAgentActiveChange?: (active: boolean) => void;
 }) {
   return (
     <ConversationProvider>
-      <ConvAIInner updateTooth={updateTooth} undoOnDO={undo} appendVoiceLogOnDO={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patientId} onAgentActiveChange={onAgentActiveChange} />
+      <ConvAIInner updateTooth={updateTooth} updateSessionNotesOnDO={updateSessionNotes} undoOnDO={undo} appendVoiceLogOnDO={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patientId} currentSessionNotes={currentSessionNotes} onAgentActiveChange={onAgentActiveChange} />
     </ConversationProvider>
   );
 }

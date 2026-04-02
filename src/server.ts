@@ -1,6 +1,7 @@
 import { routeAgentRequest } from "agents";
 import { generateReport } from "./lib/report-ai";
 import { askAboutPatient, type SessionRecord } from "./lib/patient-rag";
+import { seedDemoData } from "./lib/demo-seed";
 import { createClient, streamToDataUri } from "./lib/elevenlabs";
 import type { ToothState, VoiceLogEntry } from "./data/dental";
 
@@ -69,6 +70,36 @@ async function transcribeWithElevenLabs(
   return data.text?.trim() ?? null;
 }
 
+let sessionNotesSchemaPromise: Promise<void> | null = null;
+
+async function ensureSessionNotesColumn(env: Env): Promise<void> {
+  if (!sessionNotesSchemaPromise) {
+    sessionNotesSchemaPromise = (async () => {
+      const columns = await env.DB.prepare("PRAGMA table_info(sessions)").all<{
+        name: string;
+      }>();
+      const hasSessionNotes = (columns.results ?? []).some(
+        (column) => column.name === "session_notes",
+      );
+
+      if (!hasSessionNotes) {
+        await env.DB.prepare(
+          "ALTER TABLE sessions ADD COLUMN session_notes TEXT",
+        ).run();
+      }
+    })().catch((err) => {
+      sessionNotesSchemaPromise = null;
+      throw err;
+    });
+  }
+
+  try {
+    await sessionNotesSchemaPromise;
+  } catch {
+    // D1 may not be available in local dev; queries below will continue best-effort.
+  }
+}
+
 async function handleApiRequest(
   request: Request,
   env: Env,
@@ -85,6 +116,9 @@ async function handleApiRequest(
   }
 
   try {
+    await ensureSessionNotesColumn(env);
+    await seedDemoData(env);
+
     // GET /api/dashboard — aggregated stats + recent sessions for the dashboard
     if (url.pathname === "/api/dashboard" && request.method === "GET") {
       const [patients, sessions, activeSessions, recentSessions] =
@@ -237,6 +271,7 @@ async function handleApiRequest(
           patient_id: string;
           status: string;
           summary: string | null;
+          session_notes: string | null;
           teeth_data: string | null;
           voice_log: string | null;
           created_at: string;
@@ -362,6 +397,7 @@ async function handleApiRequest(
       const body = (await request.json()) as {
         question: string;
         currentTeeth?: ToothState[];
+        currentSessionNotes?: string;
       };
 
       if (!body.question || typeof body.question !== "string") {
@@ -376,7 +412,7 @@ async function handleApiRequest(
 
       // Fetch all sessions for this patient
       const result = await env.DB.prepare(
-        "SELECT id, status, summary, teeth_data, voice_log, created_at, completed_at FROM sessions WHERE patient_id = ? ORDER BY created_at DESC",
+        "SELECT id, status, summary, session_notes, teeth_data, voice_log, created_at, completed_at FROM sessions WHERE patient_id = ? ORDER BY created_at DESC",
       )
         .bind(patientId)
         .all<SessionRecord>();
@@ -389,6 +425,7 @@ async function handleApiRequest(
         patientName,
         sessions,
         body.currentTeeth,
+        body.currentSessionNotes,
         env.GOOGLE_AI_API_KEY,
       );
 
@@ -417,6 +454,7 @@ async function handleApiRequest(
           patient_id: string;
           status: string;
           summary: string | null;
+          session_notes: string | null;
           teeth_data: string | null;
           voice_log: string | null;
           created_at: string;
@@ -444,6 +482,7 @@ async function handleApiRequest(
         voiceLog,
         patientName,
         sessionDate,
+        session.session_notes ?? undefined,
         env.GOOGLE_AI_API_KEY,
       );
 

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   patient_id TEXT NOT NULL REFERENCES patients(id),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed')),
   summary TEXT,
+  session_notes TEXT,
   teeth_data TEXT,
   voice_log TEXT,
   created_at TEXT DEFAULT (datetime('now')),

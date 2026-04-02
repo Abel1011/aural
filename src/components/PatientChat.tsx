@@ -26,6 +26,7 @@ interface PatientChatProps {
   patientId: string;
   patientName: string;
   currentTeeth?: ToothState[];
+  currentSessionNotes?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,7 +119,7 @@ function useAudioPlayer() {
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
-export default function PatientChat({ patientId, patientName, currentTeeth }: PatientChatProps) {
+export default function PatientChat({ patientId, patientName, currentTeeth, currentSessionNotes }: PatientChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -156,7 +157,7 @@ export default function PatientChat({ patientId, patientName, currentTeeth }: Pa
       const resp = await fetch(`/api/patients/${patientId}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed, currentTeeth }),
+        body: JSON.stringify({ question: trimmed, currentTeeth, currentSessionNotes }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = (await resp.json()) as { answer: string };
@@ -184,7 +185,7 @@ export default function PatientChat({ patientId, patientName, currentTeeth }: Pa
     } finally {
       setSending(false);
     }
-  }, [patientId, currentTeeth, sending, autoSpeak]);
+  }, [patientId, currentTeeth, currentSessionNotes, sending, autoSpeak]);
 
   /* ---- TTS ---- */
   const fetchAndPlayTTS = useCallback(async (messageId: string, text: string) => {

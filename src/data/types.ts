@@ -13,6 +13,7 @@ export interface Session {
   patient_id: string;
   status: "active" | "completed";
   summary: string | null;
+  session_notes: string | null;
   created_at: string;
   completed_at: string | null;
 }

@@ -419,6 +419,7 @@ interface SessionDetail {
   patient_name: string | null;
   status: string;
   summary: string | null;
+  session_notes: string | null;
   teeth_data: ToothState[] | null;
   voice_log: VoiceLogEntry[] | null;
   created_at: string;
@@ -496,6 +497,13 @@ function SessionDetailModal({
               <div className="rounded-xl border border-sand-200/80 bg-white p-4">
                 <p className="text-[11px] font-semibold text-sand-500 uppercase tracking-wider mb-2">Summary</p>
                 <p className="text-[13px] text-sand-700 leading-relaxed">{data.summary}</p>
+              </div>
+            )}
+
+            {data.session_notes && (
+              <div className="rounded-xl border border-sand-200/80 bg-white p-4">
+                <p className="text-[11px] font-semibold text-sand-500 uppercase tracking-wider mb-2">Session notes</p>
+                <p className="text-[13px] text-sand-700 leading-relaxed whitespace-pre-wrap">{data.session_notes}</p>
               </div>
             )}
 
@@ -626,11 +634,13 @@ function PatientHistoryPanel({
   patientName,
   currentSessionId,
   currentTeeth,
+  currentSessionNotes,
 }: {
   patientId: string;
   patientName: string;
   currentSessionId: string;
   currentTeeth: ToothState[];
+  currentSessionNotes: string;
 }) {
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -729,6 +739,7 @@ function PatientHistoryPanel({
           patientId={patientId}
           patientName={patientName}
           currentTeeth={currentTeeth}
+          currentSessionNotes={currentSessionNotes}
         />
       </div>
     </div>
@@ -864,9 +875,11 @@ function VoiceSessionInner({
 }) {
   const {
     teeth,
+    sessionNotes,
     voiceLog,
     connected,
     updateTooth,
+    updateSessionNotes,
     processVoice,
     appendVoiceLog,
     undo,
@@ -1087,6 +1100,7 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
     : null;
 
   const toothsWithConditions = teeth.filter(hasToothFinding).length;
+  const hasReportableContent = toothsWithConditions > 0 || sessionNotes.trim().length > 0;
 
   return (
     <div className="grain page-bg min-h-screen">
@@ -1256,8 +1270,35 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
               />
             )}
 
+            <div className="rounded-2xl glass-card-solid glow-card overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-sand-100/50 px-4 sm:px-5 py-3">
+                <FileText className="h-3.5 w-3.5 text-sand-400" />
+                <h3 className="text-[13px] font-bold font-display text-sand-700">
+                  Session notes
+                </h3>
+                <span className="ml-auto rounded-md bg-sand-50 border border-sand-100 px-2 py-0.5 text-[10px] font-semibold text-sand-500 tabular-nums">
+                  {sessionNotes.length}/2000
+                </span>
+              </div>
+              <div className="px-4 sm:px-5 py-4 space-y-2.5">
+                <textarea
+                  value={sessionNotes}
+                  onChange={(e) => {
+                    updateSessionNotes(e.target.value, "replace", false).catch(() => {});
+                  }}
+                  maxLength={2000}
+                  placeholder="Add general notes for the whole visit: symptoms, patient concerns, treatment context, or any observation not tied to a single tooth..."
+                  rows={4}
+                  className="w-full rounded-xl border border-sand-200 bg-white px-3 py-2.5 text-[13px] text-sand-700 placeholder:text-sand-300 focus:outline-none focus:border-saffron-400 focus:ring-1 focus:ring-saffron-400/30 resize-none"
+                />
+                <p className="text-[11px] text-sand-400 leading-relaxed">
+                  Voice tools can also add to this field when the note applies to the whole session rather than one tooth.
+                </p>
+              </div>
+            </div>
+
             {/* Report section — show when there are findings */}
-            {toothsWithConditions > 0 && (
+            {hasReportableContent && (
               <div ref={reportRef} className="rounded-2xl glass-card-solid glow-card overflow-hidden">
                 <div className="h-[3px] bg-gradient-to-r from-saffron-400 via-saffron-300 to-clay-300 opacity-50" />
                 <div className="flex items-center gap-2 border-b border-sand-100 px-4 sm:px-6 py-3 sm:py-4">
@@ -1337,7 +1378,7 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
           <div className="w-full lg:w-[380px] lg:shrink-0 space-y-4 lg:space-y-0">
             {/* Agent panel — always mounted, hidden when not active */}
             <div className={voiceMode === "agent" ? "" : "hidden"}>
-              <ConvAIVoicePanel updateTooth={updateTooth} undo={undo} appendVoiceLog={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patient.id} onAgentActiveChange={setAgentActive} />
+              <ConvAIVoicePanel updateTooth={updateTooth} updateSessionNotes={updateSessionNotes} undo={undo} appendVoiceLog={appendVoiceLog} voiceLog={voiceLog} sessionId={sessionId} patientId={patient.id} currentSessionNotes={sessionNotes} onAgentActiveChange={setAgentActive} />
             </div>
             {/* Scribe panel */}
             <div className={voiceMode === "scribe" ? "" : "hidden"}>
@@ -1494,6 +1535,7 @@ ${report.replace(/## (.*)/g, "<h2>$1</h2>").replace(/### (.*)/g, "<h3>$1</h3>").
               patientName={patient.name}
               currentSessionId={sessionId}
               currentTeeth={teeth}
+              currentSessionNotes={sessionNotes}
             />
             </div>
             </div>

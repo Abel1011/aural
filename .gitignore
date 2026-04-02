@@ -18,7 +18,6 @@ dist-ssr
 .dev.vars.*
 .wrangler/
 
-# GitHub Copilot instructions and reference code — internal tooling only
 .github/
 
 # Editor directories and files

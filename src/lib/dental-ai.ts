@@ -9,6 +9,8 @@ export interface DentalCommand {
   labels?: ToothLabel[];
   mobility?: Mobility;
   note?: string;
+  sessionNote?: string;
+  noteMode?: "append" | "replace";
   raw: string;
 }
 
@@ -49,6 +51,10 @@ Rules:
 - The input may contain MULTIPLE sentences/commands concatenated. Parse each one as a separate command in the array.
 - "restoration" without a material specified defaults to surfaceCondition: "composite"
 - "decay" = surfaceCondition: "caries"
+- Tooth-specific notes should use tooth + note. Example: "tooth 24 note fractured cusp" → {"action":"add","tooth":24,"note":"fractured cusp"}
+- General visit or session notes that are NOT tied to one tooth should use sessionNote instead of note.
+- Session note phrases include: "session note", "general note", "visit note", "for this visit", "patient reports", or any whole-visit observation without a single-tooth target.
+- For sessionNote, default noteMode to "append" unless the dentist explicitly says replace, overwrite, or clear the session note.
 - If unsure about a field, omit it — but try hard to extract a valid tooth number
 
 Respond with ONLY a JSON array of commands. No markdown fences, no explanation.
@@ -81,7 +87,16 @@ Example input: "Undo last. That was tooth 25, not 15. Tooth 37 implant."
 Example output: [{"action":"undo"},{"action":"add","tooth":25,"surfaces":["M","O"],"surfaceCondition":"caries"},{"action":"add","tooth":37,"labels":["implant"]}]
 
 Example input: "24 has a large MOD restoration"
-Example output: [{"action":"add","tooth":24,"surfaces":["M","O","D"],"surfaceCondition":"composite"}]`;
+Example output: [{"action":"add","tooth":24,"surfaces":["M","O","D"],"surfaceCondition":"composite"}]
+
+Example input: "Session note, patient reports cold sensitivity on the upper left"
+Example output: [{"action":"add","sessionNote":"patient reports cold sensitivity on the upper left","noteMode":"append"}]
+
+Example input: "Tooth 14 note recurrent food impaction distal"
+Example output: [{"action":"add","tooth":14,"note":"recurrent food impaction distal"}]
+
+Example input: "Replace the session note with patient is anxious and wants conservative treatment"
+Example output: [{"action":"add","sessionNote":"patient is anxious and wants conservative treatment","noteMode":"replace"}]`;
 
 // Workers AI models in order of preference
 const MODELS = [

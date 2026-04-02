@@ -34,6 +34,7 @@ function buildFindingsText(
   voiceLog: VoiceLogEntry[],
   patientName: string,
   sessionDate: string,
+  sessionNotes?: string,
 ): string {
   const findings = teeth.filter(hasToothFinding);
 
@@ -58,6 +59,10 @@ function buildFindingsText(
     text += "Dental findings:\n" + lines.join("\n");
   } else {
     text += "No dental findings recorded.";
+  }
+
+  if (sessionNotes?.trim()) {
+    text += `\n\nGeneral session notes:\n${sessionNotes.trim()}`;
   }
 
   if (voiceLog.length > 0) {
@@ -116,13 +121,20 @@ export async function generateReport(
   voiceLog: VoiceLogEntry[],
   patientName: string,
   sessionDate: string,
+  sessionNotes?: string,
   googleAiApiKey?: string,
 ): Promise<string> {
-  const findingsText = buildFindingsText(teeth, voiceLog, patientName, sessionDate);
+  const findingsText = buildFindingsText(
+    teeth,
+    voiceLog,
+    patientName,
+    sessionDate,
+    sessionNotes,
+  );
   const findings = teeth.filter(hasToothFinding);
 
   // If no findings, return a simple report without calling the LLM
-  if (findings.length === 0) {
+  if (findings.length === 0 && !sessionNotes?.trim()) {
     return `## Clinical Findings\n\nNo dental findings were recorded during this examination.\n\n## Summary\n\nThe examination for **${patientName}** on ${sessionDate} did not record any findings. All examined teeth appear within normal parameters.\n\n## Recommended Treatment Plan\n\nRoutine dental check-up and cleaning recommended in 6 months.`;
   }
 
@@ -188,7 +200,11 @@ export async function generateReport(
       report += "\n";
     }
 
-    report += `## Summary\n\n${findings.length} teeth with findings recorded for ${patientName} on ${sessionDate}.\n\n`;
+    report += `## Summary\n\n${findings.length} teeth with findings recorded for ${patientName} on ${sessionDate}.`;
+    if (sessionNotes?.trim()) {
+      report += ` General session notes: ${sessionNotes.trim()}.`;
+    }
+    report += `\n\n`;
     report += `## Recommended Treatment Plan\n\nPlease consult with the treating dentist for a detailed treatment plan based on the findings above.`;
 
     return report;

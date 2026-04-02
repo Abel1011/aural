@@ -15,10 +15,15 @@ export interface SessionState {
   patientId: string;
   patientName: string;
   teeth: ToothState[];
+  sessionNotes: string;
   voiceLog: VoiceLogEntry[];
   status: "active" | "completed";
   startedAt: string;
 }
+
+type UndoEntry =
+  | { kind: "tooth"; toothIndex: number; previous: ToothState }
+  | { kind: "session-notes"; previous: string };
 
 const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // ElevenLabs default voice
 
@@ -52,13 +57,39 @@ function createInitialTeeth(): ToothState[] {
  */
 export class SessionAgent extends Agent<Env, SessionState> {
   // Undo stack for last commands
-  #undoStack: Array<{ toothIndex: number; previous: ToothState }> = [];
+  #undoStack: UndoEntry[] = [];
 
   // Outbound WebSocket to ElevenLabs STT
   #sttSocket: WebSocket | null = null;
 
   // Debounce timer for D1 persistence
   #persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Schema migration guard
+  #sessionNotesSchemaReady = false;
+
+  async #ensureSessionNotesColumn() {
+    if (this.#sessionNotesSchemaReady) return;
+
+    try {
+      const columns = await this.env.DB.prepare("PRAGMA table_info(sessions)").all<{
+        name: string;
+      }>();
+      const hasSessionNotes = (columns.results ?? []).some(
+        (column) => column.name === "session_notes",
+      );
+
+      if (!hasSessionNotes) {
+        await this.env.DB.prepare(
+          "ALTER TABLE sessions ADD COLUMN session_notes TEXT",
+        ).run();
+      }
+    } catch {
+      // D1 may not be available in local dev
+    }
+
+    this.#sessionNotesSchemaReady = true;
+  }
 
   /** Debounced save of current teeth + voiceLog to D1 (5s after last mutation). */
   #schedulePersist() {
@@ -70,15 +101,16 @@ export class SessionAgent extends Agent<Env, SessionState> {
   }
 
   async #persistToD1() {
-    const { sessionId, teeth, voiceLog, status } = this.state;
+    const { sessionId, teeth, sessionNotes, voiceLog, status } = this.state;
     if (!sessionId || status === "completed") return;
     try {
+      await this.#ensureSessionNotesColumn();
       const teethJson = JSON.stringify(teeth);
       const voiceLogJson = JSON.stringify(voiceLog);
       await this.env.DB.prepare(
-        "UPDATE sessions SET teeth_data = ?, voice_log = ? WHERE id = ? AND status = 'active'",
+        "UPDATE sessions SET teeth_data = ?, session_notes = ?, voice_log = ? WHERE id = ? AND status = 'active'",
       )
-        .bind(teethJson, voiceLogJson, sessionId)
+        .bind(teethJson, sessionNotes || null, voiceLogJson, sessionId)
         .run();
     } catch {
       // D1 may not be available in local dev
@@ -90,6 +122,7 @@ export class SessionAgent extends Agent<Env, SessionState> {
     patientId: "",
     patientName: "",
     teeth: createInitialTeeth(),
+    sessionNotes: "",
     voiceLog: [],
     status: "active",
     startedAt: new Date().toISOString(),
@@ -98,15 +131,50 @@ export class SessionAgent extends Agent<Env, SessionState> {
   /** Initialize the session with patient data. */
   @callable()
   async initSession(sessionId: string, patientId: string, patientName: string) {
+    await this.#ensureSessionNotesColumn();
+
+    let teeth = createInitialTeeth();
+    let sessionNotes = "";
+    let voiceLog: VoiceLogEntry[] = [];
+    let status: SessionState["status"] = "active";
+    let startedAt = new Date().toISOString();
+
+    try {
+      const record = await this.env.DB.prepare(
+        "SELECT status, teeth_data, session_notes, voice_log, created_at FROM sessions WHERE id = ?",
+      )
+        .bind(sessionId)
+        .first<{
+          status: SessionState["status"];
+          teeth_data: string | null;
+          session_notes: string | null;
+          voice_log: string | null;
+          created_at: string | null;
+        }>();
+
+      if (record?.teeth_data) {
+        teeth = JSON.parse(record.teeth_data) as ToothState[];
+      }
+      if (record?.voice_log) {
+        voiceLog = JSON.parse(record.voice_log) as VoiceLogEntry[];
+      }
+      sessionNotes = record?.session_notes ?? "";
+      status = record?.status ?? "active";
+      startedAt = record?.created_at ?? startedAt;
+    } catch {
+      // Fall back to a fresh in-memory state if D1 is unavailable.
+    }
+
     this.setState({
       ...this.state,
       sessionId,
       patientId,
       patientName,
-      teeth: createInitialTeeth(),
-      voiceLog: [],
-      status: "active",
-      startedAt: new Date().toISOString(),
+      teeth,
+      sessionNotes,
+      voiceLog,
+      status,
+      startedAt,
     });
   }
 
@@ -128,11 +196,40 @@ export class SessionAgent extends Agent<Env, SessionState> {
     if (idx === -1) return;
 
     // Save for undo
-    this.#undoStack.push({ toothIndex: idx, previous: { ...teeth[idx] } });
+    this.#undoStack.push({ kind: "tooth", toothIndex: idx, previous: { ...teeth[idx] } });
 
     teeth[idx] = { ...teeth[idx], ...changes, number: toothNumber };
     this.setState({ ...this.state, teeth });
     this.#schedulePersist();
+  }
+
+  /** Update general notes for the whole session. */
+  @callable()
+  async updateSessionNotes(
+    notes: string,
+    mode: "replace" | "append" = "replace",
+    trackUndo = true,
+  ): Promise<string> {
+    const normalized = notes.trim();
+    const previous = this.state.sessionNotes;
+    const next = mode === "append"
+      ? [previous, normalized].filter(Boolean).join("\n")
+      : normalized;
+
+    if (next === previous) return "Session notes unchanged.";
+
+    if (trackUndo) {
+      this.#undoStack.push({ kind: "session-notes", previous });
+    }
+
+    this.setState({
+      ...this.state,
+      sessionNotes: next,
+    });
+    this.#schedulePersist();
+
+    if (!next) return "Session notes cleared.";
+    return mode === "append" ? "Session note added." : "Session notes updated.";
   }
 
   /** Process a voice transcript — parse with AI, apply commands, return confirmation text. */
@@ -208,6 +305,15 @@ export class SessionAgent extends Agent<Env, SessionState> {
     const last = this.#undoStack.pop();
     if (!last) return "Nothing to undo.";
 
+    if (last.kind === "session-notes") {
+      this.setState({
+        ...this.state,
+        sessionNotes: last.previous,
+      });
+      this.#schedulePersist();
+      return "Undid last session note change.";
+    }
+
     const teeth = [...this.state.teeth];
     const toothNumber = teeth[last.toothIndex].number;
     teeth[last.toothIndex] = last.previous;
@@ -220,6 +326,7 @@ export class SessionAgent extends Agent<Env, SessionState> {
   /** Generate a voice summary of all findings in the session. */
   @callable()
   async generateSummary(): Promise<string> {
+    const generalNotes = this.state.sessionNotes.trim();
     const findings = this.state.teeth.filter(
       (t) =>
         t.labels.length > 0 ||
@@ -227,7 +334,9 @@ export class SessionAgent extends Agent<Env, SessionState> {
         t.mobility !== "none",
     );
 
-    if (findings.length === 0) return "No findings recorded in this session.";
+    if (findings.length === 0 && !generalNotes) {
+      return "No findings recorded in this session.";
+    }
 
     const lines = findings.map((t) => {
       const parts: string[] = [`Tooth ${t.number}`];
@@ -245,10 +354,23 @@ export class SessionAgent extends Agent<Env, SessionState> {
         }
       }
       if (t.mobility !== "none") parts.push(`mobility ${t.mobility}`);
+      if (t.note) parts.push(`note ${t.note}`);
       return parts.join(": ");
     });
 
-    return `Session summary. ${findings.length} teeth with findings. ${lines.join(". ")}.`;
+    const sections: string[] = [];
+    if (findings.length > 0) {
+      sections.push(
+        `Session summary. ${findings.length} teeth with findings. ${lines.join(". ")}.`,
+      );
+    } else {
+      sections.push("Session summary. No tooth-specific findings were recorded.");
+    }
+    if (generalNotes) {
+      sections.push(`General session notes: ${generalNotes}.`);
+    }
+
+    return sections.join(" ");
   }
 
   /** Convert text to speech using ElevenLabs TTS. Returns a data URI. */
@@ -353,12 +475,13 @@ export class SessionAgent extends Agent<Env, SessionState> {
 
     // Persist session results to D1 (including teeth state for later viewing)
     try {
+      await this.#ensureSessionNotesColumn();
       const teethJson = JSON.stringify(this.state.teeth);
       const voiceLogJson = JSON.stringify(this.state.voiceLog);
       await this.env.DB.prepare(
-        "UPDATE sessions SET status = 'completed', completed_at = datetime('now'), summary = ?, teeth_data = ?, voice_log = ? WHERE id = ?",
+        "UPDATE sessions SET status = 'completed', completed_at = datetime('now'), summary = ?, session_notes = ?, teeth_data = ?, voice_log = ? WHERE id = ?",
       )
-        .bind(summary, teethJson, voiceLogJson, this.state.sessionId)
+        .bind(summary, this.state.sessionNotes || null, teethJson, voiceLogJson, this.state.sessionId)
         .run();
     } catch {
       // D1 may not be available in local dev
@@ -411,11 +534,30 @@ export class SessionAgent extends Agent<Env, SessionState> {
       // Handled separately via undo()
       const last = this.#undoStack.pop();
       if (!last) return "Nothing to undo.";
+      if (last.kind === "session-notes") {
+        this.setState({ ...this.state, sessionNotes: last.previous });
+        return "Undid last session note change.";
+      }
       const teeth = [...this.state.teeth];
       const toothNumber = teeth[last.toothIndex].number;
       teeth[last.toothIndex] = last.previous;
       this.setState({ ...this.state, teeth });
       return `Undid last change on tooth ${toothNumber}.`;
+    }
+
+    if (cmd.sessionNote) {
+      const previous = this.state.sessionNotes;
+      const next = cmd.noteMode === "replace"
+        ? cmd.sessionNote.trim()
+        : [previous, cmd.sessionNote.trim()].filter(Boolean).join("\n");
+
+      if (next === previous) return "Session notes unchanged.";
+
+      this.#undoStack.push({ kind: "session-notes", previous });
+      this.setState({ ...this.state, sessionNotes: next });
+      return cmd.noteMode === "replace"
+        ? "Session notes updated."
+        : "Session note added.";
     }
 
     if (!cmd.tooth) return null;
@@ -425,7 +567,7 @@ export class SessionAgent extends Agent<Env, SessionState> {
     if (idx === -1) return null;
 
     // Save for undo
-    this.#undoStack.push({ toothIndex: idx, previous: { ...teeth[idx] } });
+    this.#undoStack.push({ kind: "tooth", toothIndex: idx, previous: { ...teeth[idx] } });
 
     const tooth = { ...teeth[idx] };
     const parts: string[] = [`Tooth ${cmd.tooth}`];
@@ -468,6 +610,7 @@ export class SessionAgent extends Agent<Env, SessionState> {
     // Apply note
     if (cmd.note) {
       tooth.note = cmd.note;
+      parts.push("note added");
     }
 
     teeth[idx] = tooth;
